@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#11b9f6">
+  <title>七巧板练习</title>
+  <link rel="stylesheet" href="app.css">
+  <script defer src="puzzles.js"></script>
+  <script defer src="engine.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <main id="app">
+    <section id="home" class="screen home">
+      <div class="home-heading"><span class="eyebrow">观察形状 · 动手拼一拼</span><h1>七巧板练习</h1><p>七块小板，拼出大世界</p></div>
+      <div class="hero"><svg id="hero-art" viewBox="0 0 1080 800" aria-label="七巧板小猫"></svg><span>今天，先拼哪一个？</span></div>
+      <button id="practice-start" class="mode primary"><span>自由练习<small>１０００道图案 · 不限时间</small></span><span aria-hidden="true">→</span></button>
+      <button id="exam-start" class="mode secondary"><span>模拟比赛<small>随机７题 · 共５分钟</small></span><span aria-hidden="true">→</span></button>
+      <button id="resume" class="resume" hidden>继续上次练习</button>
+      <p class="home-note">只要拖动，放对就会吸附锁定。</p>
+      <button id="about" class="text-button">使用说明与题目来源</button>
+      <p id="storage-note" class="storage-note" hidden>浏览器未允许保存，关闭页面后进度不会保留。</p>
+    </section>
+    <section id="game" class="screen game" hidden>
+      <header class="game-header">
+        <div class="top-line"><button id="home-button" class="text-button">‹ 首页</button><strong id="mode-label">自由练习</strong><button id="answer-card" class="text-button">选题</button></div>
+        <div class="score-line"><span id="clock">不限时</span><strong id="question-count">１／１００</strong><span id="progress">０／７块</span></div>
+      </header>
+      <div class="play-area"><div class="board">
+        <div class="board-heading"><span id="puzzle-name"></span><button id="lines-toggle" class="text-button" aria-pressed="false">显示分块线</button></div>
+        <svg id="board-svg" viewBox="0 0 1080 1560" aria-label="七巧板拖动区域"><g id="targets"></g><g id="pieces"></g></svg>
+        <p id="feedback" role="status" aria-live="polite">把彩色板拖进浅橙色图案</p>
+      </div></div>
+      <footer class="game-footer"><button id="previous" class="outline">上一题</button><button id="next" class="primary">下一题</button><button id="submit" class="submit">提交</button></footer>
+    </section>
+    <section id="result" class="screen results" hidden>
+      <span class="eyebrow">本次模拟比赛</span><h1 id="result-title">已交卷</h1>
+      <div class="result-score"><strong id="result-count">０</strong><span>／７题完成</span></div>
+      <p id="result-time"></p><div id="result-items" class="result-items"></div>
+      <p class="muted">七块全部放对才计为完成，可点题号查看。</p>
+      <button id="again" class="primary wide">再来一场</button><button id="result-home" class="outline wide">返回首页</button>
+    </section>
+  </main>
+  <dialog id="modal"><div class="modal-top"><h2 id="modal-title"></h2><button id="modal-close" class="text-button" aria-label="关闭">关闭</button></div><div id="modal-body"></div></dialog>
+  <noscript>请在浏览器中启用 JavaScript，才能进行拖动练习。</noscript>
+</body>
+</html>
