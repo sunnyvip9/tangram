@@ -12,16 +12,25 @@
   };
   const $=id=>document.getElementById(id), svgNS='http://www.w3.org/2000/svg';
   const modal=$('modal'), board=$('board-svg'), storageKey='tangram-school-web-v1-session';
+  const challengeKey='tangram-school-web-v1-challenge';
   let session=null, items=[], drag=null, screen='home', lastFocus=null, storageOK=true;
+  let regularSession=null, challengeSession=null, startingPoses={};
   let linePuzzle=null, showLines=false;
-  try { session=E.restore(localStorage.getItem(storageKey),puzzles); } catch { storageOK=false; }
+  try {
+    regularSession=E.restore(localStorage.getItem(storageKey),puzzles);
+    challengeSession=E.restore(localStorage.getItem(challengeKey),puzzles,true);
+  } catch { storageOK=false; }
+  session=regularSession;
   const formatTime=seconds=>`${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`;
   const currentPuzzle=()=>byId.get(session.ids[session.index]);
   const puzzleLabel=puzzle=>`${String(puzzles.indexOf(puzzle)+1).padStart(2,'0')} ${displayDetails[puzzle.id]?.name??puzzle.name}`;
   const placed=()=>session.placed[session.index];
   const readonly=()=>session.mode==='exam'&&session.finished!==null;
-  function save() {
-    try {localStorage.setItem(storageKey,JSON.stringify(session));}
+  const inChallenge=()=>session?.mode==='challenge';
+  const poseFor=key=>session.poses[session.index][key]??startingPoses[key];
+  function save(current=session) {
+    const key=current.mode==='challenge'?challengeKey:storageKey;
+    try {localStorage.setItem(key,JSON.stringify(current));}
     catch {storageOK=false;}
     $('storage-note').hidden=storageOK;
   }
@@ -29,8 +38,9 @@
     screen=name;
     for(const id of ['home','game','result'])$(id).hidden=id!==name;
     if(name==='home') {
-      $('resume').hidden=!session;
-      if(session)$('resume').textContent=session.mode==='practice'?'继续上次练习':session.finished!==null?'查看上次比赛结果':'继续模拟比赛（计时中）';
+      $('challenge-label').textContent=challengeSession?'继续进阶拼图':'进阶拼图';
+      $('resume').hidden=!regularSession;
+      if(regularSession)$('resume').textContent=regularSession.mode==='practice'?'继续上次练习':regularSession.finished!==null?'查看上次比赛结果':'继续模拟比赛（计时中）';
       $('storage-note').hidden=storageOK;
     }
   }
@@ -53,10 +63,50 @@
     $('feedback').textContent=message;
     $('feedback').classList.toggle('success',success);
   }
+  const polygonPoints=local=>local.map(p=>p.join(',')).join(' ');
+  function animateFlip(polygon,from,to) {
+    const animation=svgElement('animate',{
+      attributeName:'points',from:polygonPoints(from),to,
+      begin:'indefinite',dur:'320ms',calcMode:'spline',keyTimes:'0;1',keySplines:'.42 0 .58 1'
+    });
+    if(typeof animation.beginElement!=='function')return;
+    animation.addEventListener('endEvent',()=>animation.remove(),{once:true});
+    polygon.append(animation);
+    animation.beginElement();
+  }
+  function changePose(item,group,flip=false) {
+    const previous=poseFor(item.key)??{};
+    const {turns=0,flipped=false}=previous;
+    const next=flip?{turns,flipped:!flipped}:{turns:(turns+1)%8,flipped};
+    const polygon=group.firstElementChild, home=E.challengeHome(item,next);
+    let from;
+    if(flip&&!window.matchMedia('(prefers-reduced-motion: reduce)').matches){
+      const oldHome=E.challengeHome(item,previous);
+      // Express both poses relative to the final home so the long edge stays fixed.
+      from=Array.from(polygon.animatedPoints??polygon.points,point=>[
+        point.x+oldHome[0]-home[0],point.y+oldHome[1]-home[1]
+      ]);
+    }
+    const to=polygonPoints(E.orient(item.local,next));
+    polygon.querySelector('animate')?.remove();
+    session.poses[session.index][item.key]=next;
+    polygon.setAttribute('points',to);
+    transform(group,home);
+    if(from)animateFlip(polygon,from,to);
+    save();
+  }
+  function showSnapPreview(slot) {
+    if((drag.preview?.dataset.slot??null)===slot)return;
+    drag.preview?.classList.remove('snap-preview');
+    drag.preview=slot?document.querySelector(`#targets [data-slot="${slot}"]`):null;
+    drag.preview?.classList.add('snap-preview');
+    board.classList.toggle('has-snap-preview',Boolean(drag.preview));
+  }
   function cancelDrag() {
     if(!drag)return;
+    if(drag.preview)showSnapPreview(null);
     const active=drag;drag=null;
-    transform(active.group,active.item.home);
+    transform(active.group,active.home);
     active.group.classList.remove('dragging');
     if(board.hasPointerCapture(active.pointerId))board.releasePointerCapture(active.pointerId);
   }
@@ -64,10 +114,14 @@
     cancelDrag();
     show('game');
     const puzzle=currentPuzzle(), locked=placed();
+    const challenge=inChallenge();
+    $('game').classList.toggle('challenge-game',challenge);
     items=E.layout(puzzle);
     $('targets').replaceChildren();$('pieces').replaceChildren();
     if(linePuzzle!==puzzle){linePuzzle=puzzle;showLines=false;}
-    const lines=session.mode==='practice'&&showLines;
+    if(challenge)startingPoses=E.challengeStart(puzzle.id);
+    const canShowLines=session.mode!=='exam';
+    const lines=canShowLines&&showLines;
     board.classList.toggle('show-lines',Boolean(lines));
     $('targets').append(svgElement('path',{d:puzzle.outlinePath,fill:'#ffdeaa','fill-rule':'evenodd'}));
     for(const item of items) {
@@ -78,22 +132,29 @@
     for(const item of [...items.filter(p=>locked[p.key]),...items.filter(p=>!locked[p.key])]) {
       const slot=items.find(p=>p.key===locked[item.key]);
       const group=svgElement('g',{class:`piece${slot?' locked':''}`,'data-piece':item.key,'aria-label':`${item.label}${slot?'，已放好':'，拖动放置'}`,role:'img'});
-      group.append(svgElement('polygon',{points:item.local.map(p=>p.join(',')).join(' '),fill:item.color}));
-      transform(group,slot?slot.target:item.home);
+      const pose=challenge?poseFor(item.key):undefined;
+      const local=challenge?(slot?.local??E.orient(item.local,pose)):item.local;
+      group.append(svgElement('polygon',{points:polygonPoints(local),fill:item.color}));
+      transform(group,slot?slot.target:E.challengeHome(item,pose));
       $('pieces').append(group);
     }
-    $('mode-label').textContent=readonly()?'赛后检查':session.mode==='exam'?'模拟比赛':'自由练习';
+    $('mode-label').textContent=readonly()?'赛后检查':session.mode==='exam'?'模拟比赛':challenge?'进阶拼图':'自由练习';
     $('answer-card').textContent=session.mode==='exam'?'答题卡':'选题';
     $('question-count').textContent=`${session.index+1}／${session.ids.length}`;
     $('progress').textContent=`${Object.keys(locked).length}／７块`;
     $('puzzle-name').textContent=puzzleLabel(puzzle);
-    $('lines-toggle').hidden=session.mode==='exam';
+    $('lines-toggle').hidden=!canShowLines;
     $('lines-toggle').textContent=lines?'隐藏分块线':'显示分块线';
     $('lines-toggle').setAttribute('aria-pressed',String(Boolean(lines)));
     $('previous').disabled=session.index===0;
     $('next').disabled=session.index===session.ids.length-1;
+    $('challenge-flip').hidden=!challenge;
+    $('challenge-flip').disabled=Boolean(locked.PA);
     $('submit').textContent=readonly()?'成绩单':'提交';
-    setFeedback(readonly()?'已交卷，可切题检查，本次结果不再改变':E.complete(locked)?'本题已完成，可以切题或提交':'把彩色板拖进浅橙色图案',E.complete(locked));
+    if(challenge){
+      if(E.complete(locked))setFeedback('拼好了！可以挑战下一题',true);
+      else setFeedback('点一下旋转，平行四边形用「翻面」');
+    } else setFeedback(readonly()?'已交卷，可切题检查，本次结果不再改变':E.complete(locked)?'本题已完成，可以切题或提交':'把彩色板拖进浅橙色图案',E.complete(locked));
     updateClock();
   }
   function openModal(title,content) {
@@ -114,7 +175,7 @@
     $('confirm-action').onclick=()=>{closeModal();action();};
   }
   function begin(mode) {
-    const run=()=>{session=E.create(mode,puzzles);linePuzzle=null;save();renderGame();if(mode==='practice')openPicker();};
+    const run=()=>{session=regularSession=E.create(mode,puzzles);linePuzzle=null;save();renderGame();if(mode==='practice')openPicker();};
     if(session&&session.mode==='exam'&&session.finished===null) {
       confirmAction('开始新的练习？','当前模拟比赛尚未交卷。开始新的练习会替换本次进度。','开始新练习',run);
     } else if(session?.mode==='practice'&&session.placed.some(p=>Object.keys(p).length)) {
@@ -185,8 +246,10 @@
     });
   }
   function checkTimeout() {
-    if(session?.mode==='exam'&&session.finished===null&&E.remaining(session)===0) {
-      cancelDrag();E.finish(session,'timeout');save();result();return true;
+    if(regularSession?.mode==='exam'&&regularSession.finished===null&&E.remaining(regularSession)===0) {
+      E.finish(regularSession,'timeout');save(regularSession);
+      if(inChallenge())return false;
+      result();return true;
     }
     return false;
   }
@@ -203,7 +266,7 @@
   function submit() {
     if(checkTimeout())return;
     if(readonly()){result();return;}
-    if(session.mode==='practice') {
+    if(session.mode!=='exam') {
       const count=Object.keys(placed()).length;
       openModal(count===7?'拼好了！':'再试一试',count===7?'<p>七块板全部放对了。可以换一个图案继续练习。</p><button id="practice-choose" class="primary wide">选择下一题</button>':`<p>已经放好${count}块，还有${7-count}块。把剩下的彩色板拖到对应的位置。</p><button id="practice-return" class="primary wide">继续拼图</button>`);
       if(count===7)$('practice-choose').onclick=openPicker;else $('practice-return').onclick=closeModal;
@@ -220,6 +283,27 @@
     const point=new DOMPoint(event.clientX,event.clientY).matrixTransform(matrix.inverse());
     return [point.x,point.y];
   }
+  function currentSnap() {
+    const ctm=board.getScreenCTM();
+    if(!ctm)return null;
+    const tolerance=Math.min(drag.item.scale*.3,18/Math.hypot(ctm.a,ctm.b));
+    return E.snap(items,placed(),drag.item.key,drag.position,tolerance,drag.local);
+  }
+  function moveDrag(event) {
+    if(drag.tapStart&&!drag.moved&&Math.hypot(event.clientX-drag.tapStart[0],event.clientY-drag.tapStart[1])<drag.tapSlop)return;
+    const point=pointerPosition(event);
+    if(!point)return;
+    const b=E.bounds(drag.local??drag.item.local);
+    const x=drag.home[0]+point[0]-drag.start[0];
+    const y=drag.home[1]+point[1]-drag.start[1];
+    drag.position=[Math.max(-b.x0,Math.min(1080-b.x1,x)),Math.max(-b.y0,Math.min(1560-b.y1,y))];
+    drag.moved=true;
+    transform(drag.group,drag.position);
+  }
+  function preventTouchFling(event) {
+    // End a fast board drag without starting a browser gesture that can swallow the next tap.
+    if(drag&&event.cancelable)event.preventDefault();
+  }
   board.addEventListener('pointerdown',event=>{
     if(event.button!==0||!event.isPrimary||drag||checkTimeout()||readonly())return;
     const group=event.target.closest('[data-piece]');
@@ -227,27 +311,44 @@
     const item=items.find(p=>p.key===group.dataset.piece),point=pointerPosition(event);
     if(!point)return;
     event.preventDefault();
-    drag={group,item,pointerId:event.pointerId,start:point,position:[...item.home]};
+    const challenge=inChallenge(), pose=challenge?poseFor(item.key):undefined;
+    const home=E.challengeHome(item,pose);
+    drag={group,item,home,pointerId:event.pointerId,start:point,position:home};
+    if(challenge){
+      group.firstElementChild.querySelector('animate')?.remove();
+      drag.local=E.orient(item.local,pose);
+      drag.tapStart=[event.clientX,event.clientY];
+      drag.tapSlop=event.pointerType==='touch'?8:4;
+    }
     $('pieces').append(group);group.classList.add('dragging');
     board.setPointerCapture(event.pointerId);
   });
   board.addEventListener('pointermove',event=>{
     if(!drag||drag.pointerId!==event.pointerId)return;
     if(checkTimeout())return;
-    const point=pointerPosition(event), b=E.bounds(drag.item.local);
-    if(!point)return;
-    drag.position=[Math.max(-b.x0,Math.min(1080-b.x1,drag.item.home[0]+point[0]-drag.start[0])),Math.max(-b.y0,Math.min(1560-b.y1,drag.item.home[1]+point[1]-drag.start[1]))];
-    transform(drag.group,drag.position);event.preventDefault();
+    moveDrag(event);
+    if(inChallenge())showSnapPreview(drag.moved?currentSnap():null);
+    event.preventDefault();
   });
   board.addEventListener('pointerup',event=>{
     if(!drag||drag.pointerId!==event.pointerId)return;
     if(checkTimeout())return;
-    const active=drag, ctm=board.getScreenCTM();
-    const tolerance=Math.min(active.item.scale*.3,18/Math.hypot(ctm.a,ctm.b));
-    const slot=E.snap(items,placed(),active.item.key,active.position,tolerance);
+    const active=drag, challenge=inChallenge();
+    if(challenge){
+      moveDrag(event);
+      if(!active.moved){
+        cancelDrag();
+        changePose(active.item,active.group);
+        return;
+      }
+    }
+    const slot=currentSnap();
     cancelDrag();
-    if(slot){placed()[active.item.key]=slot;save();renderGame();if(!E.complete(placed()))setFeedback('放对了！已吸附锁定',true);}
-    else setFeedback('再靠近对应的位置试试');
+    if(slot){
+      placed()[active.item.key]=slot;
+      save();renderGame();
+      if(!E.complete(placed()))setFeedback('放对了！已吸附锁定',true);
+    } else setFeedback(challenge?'试试调整方向，拖到亮起的位置再松手':'再靠近对应的位置试试');
   });
   board.addEventListener('pointercancel',cancelDrag);
   board.addEventListener('lostpointercapture',cancelDrag);
@@ -256,14 +357,38 @@
   document.addEventListener('visibilitychange',()=>{cancelDrag();updateClock();});
   window.addEventListener('pageshow',updateClock);
   $('practice-start').onclick=()=>begin('practice');$('exam-start').onclick=()=>begin('exam');
+  $('challenge-start').onclick=()=>{
+    if(!challengeSession)challengeSession=E.create('challenge',puzzles);
+    session=challengeSession;
+    board.addEventListener('touchmove',preventTouchFling,{passive:false});
+    linePuzzle=null;
+    save();
+    renderGame();
+  };
   $('resume').onclick=()=>{if(checkTimeout())return;if(session.mode==='exam'&&session.finished!==null)result();else renderGame();};
-  $('home-button').onclick=()=>{cancelDrag();linePuzzle=null;closeModal();save();show('home');updateClock();};
+  $('home-button').onclick=()=>{
+    cancelDrag();
+    if(inChallenge())board.removeEventListener('touchmove',preventTouchFling);
+    linePuzzle=null;
+    closeModal();
+    save();
+    session=regularSession;
+    show('home');
+    updateClock();
+  };
   $('answer-card').onclick=openPicker;
   $('previous').onclick=()=>{if(checkTimeout()||session.index===0)return;session.index--;save();renderGame();};
   $('next').onclick=()=>{if(checkTimeout()||session.index===session.ids.length-1)return;session.index++;save();renderGame();};
   $('submit').onclick=submit;
-  $('lines-toggle').onclick=()=>{if(session.mode!=='practice')return;showLines=!showLines;renderGame();};
+  $('lines-toggle').onclick=()=>{if(session.mode==='exam')return;showLines=!showLines;renderGame();};
+  $('challenge-flip').onclick=()=>{
+    if(!inChallenge()||placed().PA)return;
+    cancelDrag();
+    const item=items.find(p=>p.key==='PA');
+    const group=$('pieces').querySelector('[data-piece="PA"]');
+    changePose(item,group,true);
+  };
   $('again').onclick=()=>begin('exam');$('result-home').onclick=()=>show('home');
-  $('about').onclick=()=>openModal('使用说明与题目来源',`<p>把彩色板拖到浅橙色图案中。朝向已经摆好，无需旋转或翻面；放对后吸附锁定，放错回原位。</p><p>自由练习默认只显示轮廓，右上角可以显示／隐藏分块线，切换题目后恢复隐藏。模拟比赛随机７题，共５分钟，全部只显示轮廓，可以来回切题。点击「提交」交整卷，时间到自动交卷。只有七块全部放对才计为完成。</p><p>本机保存当前进度；刷新与切到后台不会暂停比赛。页面供家庭练习使用。</p><p>新增９００道参考 GLPeces（I. De Marchi）具名七巧板题，按标准七块重建并筛选。<a href="licenses/GLPeces-COPYING.txt" target="_blank" rel="noopener">GLPeces GPL 许可文本</a>。</p><details><summary>查看题目参考来源</summary><p>题库包含基础图形、动物、人物和生活物品。其中６２道参考 Florida Center for Instructional Technology，University of South Florida，ClipArt ETC，按标准七块重建。</p><ul class="source-links"><li><a target="_blank" rel="noopener" href="https://etc.usf.edu/clipart/galleries/681-tangram-cards">完整参考卡片集</a></li><li><a target="_blank" rel="noopener" href="https://etc.usf.edu/clipart/74300/74382/74382_animals2_sa.htm">猫与兔</a></li><li><a target="_blank" rel="noopener" href="https://etc.usf.edu/clipart/74300/74383/74383_birds_sa.htm">鸟类</a>、<a target="_blank" rel="noopener" href="https://etc.usf.edu/clipart/74300/74386/74386_fish_sa.htm">鱼类</a></li><li><a target="_blank" rel="noopener" href="https://etc.usf.edu/clipart/74300/74390/74390_people2_sa.htm">人物</a>、<a target="_blank" rel="noopener" href="https://etc.usf.edu/clipart/74300/74388/74388_h-items_sa.htm">生活物品</a></li></ul><p>本版本供本地非商业教育练习，保留参考署名。来源采用有限制的 <a target="_blank" rel="noopener" href="https://etc.usf.edu/clipart/info/license">Free Classroom License</a>。</p></details>`);
+  $('about').onclick=()=>openModal('使用说明与题目来源',`<p>在自由练习和模拟比赛中，板块朝向已经摆好，直接拖到浅橙色图案中即可。放对后吸附锁定，放错回原位。</p><p>自由练习和进阶拼图默认只显示轮廓，右上角可以显示／隐藏分块线，切换题目后恢复隐藏。模拟比赛随机７题，共５分钟，全部只显示轮廓，可以来回切题。点击「提交」交整卷，时间到自动交卷。只有七块全部放对才计为完成。</p><p>进阶拼图不限时。点一下板块，顺时针转４５°。点棋盘右下角「翻面」，平行四边形会沿一条长边翻到另一侧。拖到匹配位置亮起时松手，板块就会吸附。放错回原位，方向会保留。点底部「提交」可检查当前题完成情况。</p><p>本机单独保存进阶拼图的进度。刷新与切到后台不会暂停比赛。页面供家庭练习使用。</p><p>新增９００道参考 GLPeces（I. De Marchi）具名七巧板题，按标准七块重建并筛选。<a href="licenses/GLPeces-COPYING.txt" target="_blank" rel="noopener">GLPeces GPL 许可文本</a>。</p><details><summary>查看题目参考来源</summary><p>题库包含基础图形、动物、人物和生活物品。其中６２道参考 Florida Center for Instructional Technology，University of South Florida，ClipArt ETC，按标准七块重建。</p><ul class="source-links"><li><a target="_blank" rel="noopener" href="https://etc.usf.edu/clipart/galleries/681-tangram-cards">完整参考卡片集</a></li><li><a target="_blank" rel="noopener" href="https://etc.usf.edu/clipart/74300/74382/74382_animals2_sa.htm">猫与兔</a></li><li><a target="_blank" rel="noopener" href="https://etc.usf.edu/clipart/74300/74383/74383_birds_sa.htm">鸟类</a>、<a target="_blank" rel="noopener" href="https://etc.usf.edu/clipart/74300/74386/74386_fish_sa.htm">鱼类</a></li><li><a target="_blank" rel="noopener" href="https://etc.usf.edu/clipart/74300/74390/74390_people2_sa.htm">人物</a>、<a target="_blank" rel="noopener" href="https://etc.usf.edu/clipart/74300/74388/74388_h-items_sa.htm">生活物品</a></li></ul><p>本版本供本地非商业教育练习，保留参考署名。来源采用有限制的 <a target="_blank" rel="noopener" href="https://etc.usf.edu/clipart/info/license">Free Classroom License</a>。</p></details>`);
   show('home');updateClock();setInterval(updateClock,200);
 })();

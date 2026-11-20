@@ -17,8 +17,9 @@
       <div class="hero"><svg id="hero-art" viewBox="0 0 1080 800" aria-label="七巧板小猫"></svg><span>今天，先拼哪一个？</span></div>
       <button id="practice-start" class="mode primary"><span>自由练习<small>１０００道图案 · 不限时间</small></span><span aria-hidden="true">→</span></button>
       <button id="exam-start" class="mode secondary"><span>模拟比赛<small>随机７题 · 共５分钟</small></span><span aria-hidden="true">→</span></button>
+      <button id="challenge-start" class="mode challenge"><span><span id="challenge-label">进阶拼图</span><small>转一转、翻个面 · 不限时间</small></span><span aria-hidden="true">→</span></button>
       <button id="resume" class="resume" hidden>继续上次练习</button>
-      <p class="home-note">只要拖动，放对就会吸附锁定。</p>
+      <p class="home-note">板块放对就会吸附锁定。</p>
       <button id="about" class="text-button">使用说明与题目来源</button>
       <p id="storage-note" class="storage-note" hidden>浏览器未允许保存，关闭页面后进度不会保留。</p>
     </section>
@@ -28,11 +29,21 @@
         <div class="score-line"><span id="clock">不限时</span><strong id="question-count">１／１００</strong><span id="progress">０／７块</span></div>
       </header>
       <div class="play-area"><div class="board">
-        <div class="board-heading"><span id="puzzle-name"></span><button id="lines-toggle" class="text-button" aria-pressed="false">显示分块线</button></div>
+        <div class="board-heading">
+          <span id="puzzle-name"></span>
+          <button id="lines-toggle" class="text-button" aria-pressed="false">显示分块线</button>
+        </div>
         <svg id="board-svg" viewBox="0 0 1080 1560" aria-label="七巧板拖动区域"><g id="targets"></g><g id="pieces"></g></svg>
-        <p id="feedback" role="status" aria-live="polite">把彩色板拖进浅橙色图案</p>
+        <div class="board-feedback">
+          <p id="feedback" role="status" aria-live="polite">把彩色板拖进浅橙色图案</p>
+          <button id="challenge-flip" class="outline" aria-label="平行四边形翻面" hidden>翻面</button>
+        </div>
       </div></div>
-      <footer class="game-footer"><button id="previous" class="outline">上一题</button><button id="next" class="primary">下一题</button><button id="submit" class="submit">提交</button></footer>
+      <footer class="game-footer">
+        <button id="previous" class="outline">上一题</button>
+        <button id="next" class="primary">下一题</button>
+        <button id="submit" class="submit">提交</button>
+      </footer>
     </section>
     <section id="result" class="screen results" hidden>
       <span class="eyebrow">本次模拟比赛</span><h1 id="result-title">已交卷</h1>
